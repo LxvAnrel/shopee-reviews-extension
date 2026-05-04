@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopee Reviews Manager</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f6f8;
+      color: #202124;
+    }
+
+    header {
+      background: #ee4d2d;
+      color: #fff;
+      padding: 18px 24px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      font-size: 13px;
+      opacity: 0.9;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      gap: 16px;
+    }
+
+    section {
+      background: #fff;
+      border: 1px solid #dde1e6;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: #4b5563;
+      margin-bottom: 6px;
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      border: 1px solid #ccd2d9;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 14px;
+      color: #202124;
+      background: #fff;
+      outline: none;
+    }
+
+    textarea {
+      min-height: 280px;
+      resize: vertical;
+      padding: 10px;
+      line-height: 1.45;
+    }
+
+    .shop-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+
+    input {
+      height: 38px;
+      padding: 0 10px;
+    }
+
+    textarea:focus,
+    input:focus {
+      border-color: #ee4d2d;
+      box-shadow: 0 0 0 2px rgba(238, 77, 45, 0.12);
+    }
+
+    .controls {
+      display: grid;
+      gap: 12px;
+    }
+
+    .hint {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #626b78;
+      margin-top: 6px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      min-height: 38px;
+      padding: 0 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: #ee4d2d;
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #e9edf2;
+      color: #202124;
+    }
+
+    button.danger {
+      background: #c62828;
+      color: #fff;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .stat {
+      border: 1px solid #e1e5ea;
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfd;
+    }
+
+    .stat span {
+      display: block;
+      color: #626b78;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .stat strong {
+      font-size: 22px;
+    }
+
+    .bar {
+      height: 10px;
+      border-radius: 999px;
+      background: #e1e5ea;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .bar div {
+      height: 100%;
+      width: 0%;
+      background: #ee4d2d;
+      transition: width 0.2s ease;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #4b5563;
+    }
+
+    .logs {
+      max-height: 230px;
+      overflow: auto;
+      border: 1px solid #e1e5ea;
+      border-radius: 6px;
+      background: #fbfcfd;
+      padding: 10px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .preview {
+      display: none;
+    }
+
+    .preview-edit-input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 12px;
+      box-sizing: border-box;
+      background: #fff;
+    }
+
+    .cell-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .preview.active {
+      display: block;
+    }
+
+    .preview-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .preview-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .preview-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .preview-table-wrap {
+      overflow: auto;
+      border: 1px solid #e1e5ea;
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      min-width: 860px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      padding: 8px;
+      border-bottom: 1px solid #e9edf2;
+    }
+
+    th {
+      background: #fbfcfd;
+      color: #4b5563;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    td a {
+      color: #1565c0;
+      text-decoration: none;
+    }
+
+    .product-preview {
+      display: grid;
+      grid-template-columns: 74px minmax(220px, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .product-preview-images {
+      display: grid;
+      grid-template-columns: repeat(2, 74px);
+      gap: 8px;
+      align-items: start;
+    }
+
+    .product-preview-image {
+      display: grid;
+      gap: 4px;
+      text-align: center;
+    }
+
+    .product-preview-image img {
+      width: 74px;
+      height: 74px;
+      object-fit: cover;
+      border: 1px solid #e1e5ea;
+      border-radius: 6px;
+      background: #f5f6f8;
+    }
+
+    .product-preview-image span {
+      font-size: 10px;
+      color: #6b7280;
+    }
+
+    .product-preview img {
+      width: 74px;
+      height: 74px;
+      object-fit: cover;
+      border: 1px solid #e1e5ea;
+      border-radius: 6px;
+      background: #f5f6f8;
+    }
+
+    .product-preview .no-image {
+      width: 74px;
+      height: 74px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #e1e5ea;
+      border-radius: 6px;
+      background: #f5f6f8;
+      color: #88909b;
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .product-preview-title {
+      display: block;
+      margin-bottom: 5px;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+
+    .score {
+      font-weight: 700;
+      color: #202124;
+    }
+
+    .unmatched {
+      margin-top: 12px;
+      color: #8a4b00;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 760px) {
+      .grid,
+      .stats,
+      .shop-row {
+        grid-template-columns: 1fr;
+      }
+
+      main {
+        padding: 12px;
+      }
+
+      .preview-head {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Shopee Reviews Manager</h1>
+    <p>Gerencie varios produtos, controle quantas paginas abrem por vez e exporte um CSV unico.</p>
+  </header>
+
+  <main>
+    <section>
+      <div class="shop-row">
+        <div>
+          <label for="shopeeShopUrl">Loja Shopee para associar</label>
+          <input id="shopeeShopUrl" type="url" value="https://shopee.com.br/spf_distribuidora?categoryId=100001&entryPoint=ShopByPDP&itemId=17475776267">
+          <div class="hint">Cole handles abaixo e use este botao para gerar: URL do anuncio Shopee | handle Shopify.</div>
+        </div>
+        <div>
+          <label for="userStoreUrl">Minha loja (opcional)</label>
+          <input id="userStoreUrl" type="url" placeholder="https://www.uvits.com.br">
+          <div class="hint">Se você usar só o handle, a extensão abrirá sua página de produto usando essa base.</div>
+        </div>
+        <div class="actions" style="margin-top:0">
+          <button class="secondary" id="associate">Associar anuncios</button>
+          <button class="danger" id="cancelAssociation" disabled>Cancelar</button>
+        </div>
+      </div>
+
+      <div class="shop-row" style="margin-top:16px; padding:14px; border:1px solid #e1e5ea; border-radius:10px; background:#fff;">
+        <div style="display:grid; gap:10px;">
+          <strong>Mapeamento manual da loja (opcional)</strong>
+          <div class="hint">Use seletores CSS apenas para escanear a página da sua loja. Se você já fornecer o handle ou a URL do produto, não precisa usar esse mapeamento.</div>
+          <div>
+            <label for="manualItemSelector">Seletor do item</label>
+            <input id="manualItemSelector" type="text" placeholder=".item-card">
+          </div>
+          <div>
+            <label for="manualLinkSelector">Seletor do link (opcional)</label>
+            <input id="manualLinkSelector" type="text" placeholder="a.item-link">
+          </div>
+          <div>
+            <label for="manualTitleSelector">Seletor do título</label>
+            <input id="manualTitleSelector" type="text" placeholder=".item-title">
+          </div>
+          <div>
+            <label for="manualImageSelector">Seletor da imagem (opcional)</label>
+            <input id="manualImageSelector" type="text" placeholder=".item-image img">
+          </div>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div>
+        <label for="products">Produtos</label>
+        <textarea id="products" placeholder="Cole handles ou URLs. Para coletar, use: URL Shopee | handle Shopify"></textarea>
+        <div class="hint">Antes da associacao: um handle por linha. Depois: URL do anuncio Shopee | handle Shopify.</div>
+      </div>
+
+      <div class="controls">
+        <div>
+          <label for="maxReviews">Reviews por produto</label>
+          <input id="maxReviews" type="number" min="0" value="100">
+          <div class="hint">Use 0 para coletar tudo que a extensao conseguir carregar.</div>
+        </div>
+
+        <div>
+          <label for="concurrency">Paginas por vez</label>
+          <input id="concurrency" type="number" min="1" max="8" value="1">
+          <div class="hint">Dispositivo fraco: 1. Medio: 2. Forte: 3 ou 4.</div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="start">Iniciar coleta</button>
+          <button class="danger" id="stop" disabled>Parar</button>
+          <button class="secondary" id="save">Salvar lista</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview" id="preview">
+      <div class="preview-head">
+        <div>
+          <h2>Preview da associacao</h2>
+          <div class="hint" id="previewSummary">Nenhuma associacao gerada ainda.</div>
+        </div>
+        <div class="preview-actions">
+          <button class="primary" id="applyPreview">Aplicar na lista</button>
+          <button class="secondary" id="addPreviewAssociation">Adicionar associação</button>
+          <button class="secondary" id="copyPreview">Copiar texto direto</button>
+          <button class="secondary" id="clearPreview">Limpar preview</button>
+        </div>
+      </div>
+      <div class="preview-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Handle</th>
+              <th>Preview Shopee</th>
+              <th>Comentarios</th>
+              <th>Score</th>
+              <th>Etapa</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="previewRows"></tbody>
+        </table>
+      </div>
+      <div class="unmatched" id="unmatchedPreview"></div>
+    </section>
+
+    <section>
+      <div class="stats">
+        <div class="stat"><span>Produtos</span><strong id="statTotal">0</strong></div>
+        <div class="stat"><span>Concluidos</span><strong id="statDone">0</strong></div>
+        <div class="stat"><span>Ativos</span><strong id="statActive">0</strong></div>
+        <div class="stat"><span>Pendentes</span><strong id="statPending">0</strong></div>
+        <div class="stat"><span>Reviews</span><strong id="statReviews">0</strong></div>
+      </div>
+      <div class="bar"><div id="progressBar"></div></div>
+      <div class="status" id="statusText">Pronto para iniciar.</div>
+    </section>
+
+    <section>
+      <label>Registro</label>
+      <div class="logs" id="logs">Sem atividade ainda.</div>
+    </section>
+  </main>
+
+  <script src="manager.js"></script>
+</body>
+</html>
