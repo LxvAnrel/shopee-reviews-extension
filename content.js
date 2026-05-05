@@ -410,7 +410,7 @@ async function coletarReviewsDOM(maxReviews = 0) {
 
       // Extrai URLs de mídia (abre modal para pegar qualidade maior)
       const mediaUrls = await extractMediaUrlsWithExpand(el);
-      const picture_urls = mediaUrls.join(',');
+      const picture_urls = mediaUrls.join(', ');
 
       if (body) {
         reviews.push({ reviewer_name, rating, review_date, body, picture_urls, has_media: Boolean(picture_urls) });
@@ -466,18 +466,29 @@ async function coletarTodasPaginas(maxReviews = 0) {
   const collected = [];
   const seen = new Set();
   const maxPages = 200;
+  const MAX_EMPTY_PAGES = 3;
+  let emptyPageStreak = 0;
 
   for (let page = 1; page <= maxPages; page++) {
     const remaining = maxReviews > 0 ? maxReviews - collected.length : 0;
     const pageReviews = await coletarReviewsDOM(remaining);
+    let newCount = 0;
 
     pageReviews.forEach(review => {
       const key = getReviewKey(review);
       if (!seen.has(key)) {
         seen.add(key);
         collected.push(review);
+        newCount++;
       }
     });
+
+    if (newCount === 0) {
+      emptyPageStreak++;
+      if (emptyPageStreak >= MAX_EMPTY_PAGES) break;
+    } else {
+      emptyPageStreak = 0;
+    }
 
     if (maxReviews > 0 && collected.length >= maxReviews) break;
 

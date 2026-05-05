@@ -8,6 +8,8 @@ const DEFAULT_STATE = {
   failed: 0,
   active: 0,
   queue: [],
+  currentProducts: [],
+  productList: [],
   results: [],
   errors: [],
   logs: [],
@@ -15,6 +17,7 @@ const DEFAULT_STATE = {
   finishedAt: null,
   downloadName: '',
   finishing: false,
+  paused: false,
   association: {
     running: false,
     handles: [],
@@ -34,6 +37,61 @@ const activeTabs = new Set();
 
 function resetState() {
   state = structuredClone(DEFAULT_STATE);
+}
+
+function saveBatchProgress() {
+  try {
+    const progress = {
+      completed: state.completed,
+      failed: state.failed,
+      queue: [...state.queue, ...state.currentProducts],
+      errors: state.errors,
+      startedAt: state.startedAt,
+      total: state.total,
+      maxReviews: state.maxReviews,
+      concurrency: state.concurrency
+    };
+    chrome.storage.local.set({ 'shopee_batch_progress': progress });
+  } catch (e) {
+    console.error('Erro ao salvar progresso:', e);
+  }
+}
+
+function appendResultsToStorage(reviews) {
+  return new Promise(resolve => {
+    chrome.storage.local.get('shopee_batch_results', data => {
+      const existing = data.shopee_batch_results || [];
+      chrome.storage.local.set({ 'shopee_batch_results': [...existing, ...reviews] }, resolve);
+    });
+  });
+}
+
+function loadBatchProgress() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['shopee_batch_progress', 'shopee_batch_results'], data => {
+      const progress = data.shopee_batch_progress || null;
+      if (progress) {
+        progress.results = data.shopee_batch_results || [];
+      }
+      resolve(progress);
+    });
+  });
+}
+
+function clearBatchProgress() {
+  chrome.storage.local.remove(['shopee_batch_progress', 'shopee_batch_results']);
+}
+
+function setProductStatus(url, status, reviews = 0, error = '') {
+  const item = state.productList.find(p => p.url === url);
+  if (!item) return;
+  item.status = status;
+  if (reviews) item.reviews = reviews;
+  if (error) item.error = error;
+}
+
+function hasValidReviews(reviews) {
+  return reviews.some(review => review.body && String(review.body).trim());
 }
 
 function log(message) {
@@ -64,6 +122,7 @@ function getPublicState() {
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
     downloadName: state.downloadName,
+    productList: state.productList,
     association: state.association
   };
 }
@@ -488,8 +547,12 @@ async function sendTabMessage(tabId, payload) {
 async function processProduct(product) {
   let tab = null;
 
+  state.currentProducts.push(product);
+  setProductStatus(product.url, 'active');
+  saveBatchProgress();
+
   try {
-    tab = await chrome.tabs.create({ url: product.url, active: false });
+    tab = await chrome.tabs.create({ url: product.url, active: true });
     activeTabs.add(tab.id);
     await waitForTabLoaded(tab.id);
     await new Promise(resolve => setTimeout(resolve, 1800));
@@ -503,9 +566,24 @@ async function processProduct(product) {
       product_url: product.url
     }));
 
+    if (!reviews.length) {
+      state.failed += 1;
+      setProductStatus(product.url, 'skipped');
+      log(`${product.handle}: nenhuma review encontrada - pulando produto.`);
+      return;
+    }
+
     state.results.push(...reviews);
     state.completed += 1;
-    log(`${product.handle}: ${reviews.length} reviews coletadas.`);
+    await appendResultsToStorage(reviews);
+    setProductStatus(product.url, 'done', reviews.length);
+    saveBatchProgress();
+
+    const withBody = reviews.filter(r => r.body && String(r.body).trim()).length;
+    const label = withBody < reviews.length
+      ? `${reviews.length} reviews (${withBody} com texto)`
+      : `${reviews.length} reviews`;
+    log(`${product.handle}: ${label} coletadas.`);
   } catch (error) {
     state.failed += 1;
     state.errors.push({
@@ -513,8 +591,12 @@ async function processProduct(product) {
       handle: product.handle,
       error: error.message || 'Erro desconhecido'
     });
+    setProductStatus(product.url, 'failed', 0, error.message || 'Erro desconhecido');
     log(`${product.handle}: erro - ${error.message || 'falha na coleta'}.`);
   } finally {
+    state.currentProducts = state.currentProducts.filter(p => p.id !== product.id);
+    saveBatchProgress();
+
     if (tab?.id) {
       activeTabs.delete(tab.id);
       try {
@@ -529,7 +611,7 @@ async function collectShopAdsFromUrl(shopUrl, selectors = {}) {
 
   try {
     assertAssociationNotCancelled();
-    tab = await chrome.tabs.create({ url: shopUrl, active: false });
+    tab = await chrome.tabs.create({ url: shopUrl, active: true });
     activeTabs.add(tab.id);
     await waitForTabLoaded(tab.id);
     assertAssociationNotCancelled();
@@ -559,7 +641,7 @@ async function enrichAdWithStats(ad) {
 
   try {
     assertAssociationNotCancelled();
-    tab = await chrome.tabs.create({ url: ad.url, active: false });
+    tab = await chrome.tabs.create({ url: ad.url, active: true });
     activeTabs.add(tab.id);
     await waitForTabLoaded(tab.id);
     assertAssociationNotCancelled();
@@ -666,7 +748,7 @@ async function collectHandleMetadata(handleObj) {
   let tab = null;
 
   try {
-    tab = await chrome.tabs.create({ url, active: false });
+    tab = await chrome.tabs.create({ url, active: true });
     activeTabs.add(tab.id);
     await waitForTabLoaded(tab.id);
     await new Promise(resolve => setTimeout(resolve, 1800));
@@ -700,7 +782,7 @@ async function searchShopeeByBrand(brandName, limit = 100) {
   try {
     assertAssociationNotCancelled();
     const searchUrl = `https://shopee.com.br/search?keyword=${encodeURIComponent(brandName)}`;
-    tab = await chrome.tabs.create({ url: searchUrl, active: false });
+    tab = await chrome.tabs.create({ url: searchUrl, active: true });
     activeTabs.add(tab.id);
     await waitForTabLoaded(tab.id);
     assertAssociationNotCancelled();
@@ -884,6 +966,7 @@ async function finishBatchIfDone() {
     log('Finalizado sem reviews coletadas.');
   }
 
+  clearBatchProgress();
   state.finishing = false;
 }
 
@@ -966,18 +1049,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
-    resetState();
-    state.running = true;
-    state.concurrency = Math.max(1, Math.min(Number(message.concurrency) || 1, 8));
-    state.maxReviews = Math.max(0, Number(message.maxReviews) || 0);
-    state.queue = products;
-    state.total = products.length;
-    state.startedAt = new Date().toISOString();
-    log(`Iniciando ${products.length} produtos com ${state.concurrency} paginas por vez.`);
+    loadBatchProgress().then(progress => {
+      resetState();
+      state.running = true;
+      state.concurrency = Math.max(1, Math.min(Number(message.concurrency) || 1, 8));
+      state.maxReviews = Math.max(0, Number(message.maxReviews) || 0);
+      state.total = products.length;
+      state.startedAt = new Date().toISOString();
 
-    pumpQueue();
-    sendResponse(getPublicState());
-    return false;
+      if (progress && progress.results && progress.results.length) {
+        const doneUrls = new Set(progress.results.map(r => r.product_url));
+        state.results = progress.results;
+        state.completed = progress.completed || 0;
+        state.failed = progress.failed || 0;
+
+        const remaining = products.filter(p => !doneUrls.has(p.url));
+        const remainingUrls = new Set(remaining.map(p => p.url));
+        const interrupted = (progress.queue || []).filter(p => !doneUrls.has(p.url) && !remainingUrls.has(p.url));
+
+        state.queue = [...interrupted, ...remaining];
+        log(`Retomando coleta: ${state.results.length} reviews salvas. ${state.queue.length} produtos restantes.`);
+      } else {
+        state.queue = products;
+        log(`Iniciando ${products.length} produtos com ${state.concurrency} paginas por vez.`);
+      }
+
+      const doneUrls = progress ? new Set(progress.results.map(r => r.product_url)) : new Set();
+      state.productList = products.map(p => ({
+        url: p.url,
+        handle: p.handle,
+        status: doneUrls.has(p.url) ? 'done' : 'pending',
+        reviews: doneUrls.has(p.url)
+          ? (progress.results.filter(r => r.product_url === p.url).length)
+          : 0,
+        error: ''
+      }));
+
+      pumpQueue();
+      sendResponse(getPublicState());
+    });
+
+    return true;
   }
 
   if (message.action === 'stopBatch') {
@@ -1007,5 +1119,111 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'cancelAssociation') {
     cancelAssociation().then(() => sendResponse(getPublicState()));
     return true;
+  }
+
+  if (message.action === 'retryProduct') {
+    const item = state.productList.find(p => p.url === message.url);
+    if (!item) { sendResponse({ error: 'Produto nao encontrado.' }); return false; }
+    item.status = 'pending';
+    item.error = '';
+    item.reviews = 0;
+    const product = { id: `${Date.now()}-retry`, url: item.url, handle: item.handle };
+    state.queue.push(product);
+    state.total += 1;
+    state.failed = Math.max(0, state.failed - 1);
+    if (!state.running) {
+      state.running = true;
+      state.finishing = false;
+      state.finishedAt = null;
+      pumpQueue();
+    }
+    sendResponse(getPublicState());
+    return false;
+  }
+
+  if (message.action === 'downloadCSV') {
+    downloadCSV().then(() => sendResponse(getPublicState())).catch(() => sendResponse(getPublicState()));
+    return true;
+  }
+
+  if (message.action === 'pauseBatch') {
+    if (!state.running) {
+      sendResponse({ error: 'Nenhuma coleta em andamento.' });
+      return false;
+    }
+    state.paused = true;
+    state.stopRequested = true;
+    state.queue = [];
+    state.currentProducts.forEach(p => {
+      state.queue.push(p);
+    });
+    log('Coleta pausada. Produto em processamento readicionado à fila.');
+    sendResponse(getPublicState());
+    return false;
+  }
+
+  if (message.action === 'resumeBatch') {
+    if (!state.paused) {
+      sendResponse({ error: 'Coleta nao está pausada.' });
+      return false;
+    }
+    state.paused = false;
+    state.stopRequested = false;
+    state.running = true;
+    state.finishing = false;
+    log('Coleta retomada.');
+    pumpQueue();
+    sendResponse(getPublicState());
+    return false;
+  }
+
+  if (message.action === 'retrySelected') {
+    const { urls } = message;
+    if (!Array.isArray(urls) || urls.length === 0) {
+      sendResponse({ error: 'Selecione pelo menos um produto.' });
+      return false;
+    }
+    urls.forEach(url => {
+      const item = state.productList.find(p => p.url === url);
+      if (!item || item.status === 'skipped') return;
+      item.status = 'pending';
+      item.error = '';
+      item.reviews = 0;
+      const product = { id: `${Date.now()}-${Math.random()}`, url: item.url, handle: item.handle };
+      state.queue.push(product);
+    });
+    state.total += urls.length;
+    if (!state.running) {
+      state.running = true;
+      state.finishing = false;
+      pumpQueue();
+    }
+    log(`${urls.length} produto(s) adicionado(s) à fila.`);
+    sendResponse(getPublicState());
+    return false;
+  }
+
+  if (message.action === 'retryAll') {
+    const notDone = state.productList.filter(p => p.status !== 'done' && p.status !== 'skipped');
+    if (notDone.length === 0) {
+      sendResponse({ error: 'Nenhum produto para retentar.' });
+      return false;
+    }
+    notDone.forEach(item => {
+      item.status = 'pending';
+      item.error = '';
+      item.reviews = 0;
+      const product = { id: `${Date.now()}-${Math.random()}`, url: item.url, handle: item.handle };
+      state.queue.push(product);
+    });
+    state.total += notDone.length;
+    if (!state.running) {
+      state.running = true;
+      state.finishing = false;
+      pumpQueue();
+    }
+    log(`${notDone.length} produto(s) adicionado(s) à fila.`);
+    sendResponse(getPublicState());
+    return false;
   }
 });

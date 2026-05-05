@@ -3,7 +3,7 @@
   "name": "Shopee Reviews Exporter",
   "version": "1.1",
   "description": "Exporta reviews da Shopee para CSV compativel com Judge.me",
-  "permissions": ["activeTab", "scripting", "downloads", "tabs", "storage"],
+  "permissions": ["activeTab", "scripting", "downloads", "tabs", "storage", "unlimitedStorage"],
   "host_permissions": ["https://shopee.com.br/*"],
   "background": {
     "service_worker": "background.js"
