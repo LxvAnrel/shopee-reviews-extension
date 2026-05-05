@@ -265,12 +265,98 @@ function getReviewsArea() {
   return document;
 }
 
-function coletarReviewsDOM(maxReviews = 0) {
+function extractMediaUrlsFromExpandedModal() {
+  const mediaUrls = [];
+
+  // Procura containers de mídia na modal expandida
+  const zoomedContainers = document.querySelectorAll('.rating-media-list__zoomed-image, [class*="media"][class*="zoom"], .modal-image-container, [class*="carousel"]');
+
+  for (const container of zoomedContainers) {
+    if (!container.offsetParent) continue; // Verifica se é visível
+
+    // Extrai vídeos
+    const videos = container.querySelectorAll('video[src]');
+    videos.forEach(video => {
+      const src = video.getAttribute('src');
+      if (src && !mediaUrls.includes(src)) mediaUrls.push(src);
+    });
+
+    // Extrai imagens de <picture>
+    const pictures = container.querySelectorAll('picture');
+    pictures.forEach(picture => {
+      const source = picture.querySelector('source[srcset]');
+      if (source) {
+        const srcset = source.getAttribute('srcset');
+        const bestUrl = parseSrcset(srcset);
+        if (bestUrl && !mediaUrls.includes(bestUrl)) {
+          mediaUrls.push(normalizeShopeeImageUrl(bestUrl));
+        }
+      } else {
+        const img = picture.querySelector('img[src]');
+        if (img) {
+          const url = getImageUrl(img);
+          if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
+        }
+      }
+    });
+
+    // Extrai imagens diretas <img>
+    const imgs = container.querySelectorAll('img[src]');
+    imgs.forEach(img => {
+      const url = getImageUrl(img);
+      if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
+    });
+  }
+
+  return mediaUrls;
+}
+
+async function extractMediaUrlsWithExpand(reviewEl) {
+  const mediaUrls = [];
+
+  // Procura elemento de mídia clicável (thumbnail)
+  const mediaContainer = reviewEl.querySelector('[class*="media"], .rating-image-list, .review-image-wrapper');
+  const mediaImages = reviewEl.querySelectorAll('.rating-image-list img, [class*="media"] img, .review-image img');
+
+  if (!mediaImages.length) return [];
+
+  // Clica na primeira imagem para abrir a modal
+  const firstImage = mediaImages[0];
+  if (firstImage) {
+    const clickableParent = firstImage.closest('button') || firstImage.closest('[role="button"]') || firstImage.closest('div[style*="cursor"]') || firstImage;
+
+    if (clickableParent) {
+      clickableParent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(300);
+      clickableParent.click();
+      await sleep(800);
+
+      // Extrai URLs da modal aberta
+      mediaUrls.push(...extractMediaUrlsFromExpandedModal());
+
+      // Tenta fechar a modal (ESC ou botão de fechar)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
+      await sleep(400);
+    }
+  }
+
+  // Se não conseguiu abrir ou extrair, tenta diretamente do thumbnail
+  if (!mediaUrls.length) {
+    mediaImages.forEach(img => {
+      const url = getImageUrl(img);
+      if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
+    });
+  }
+
+  return mediaUrls;
+}
+
+async function coletarReviewsDOM(maxReviews = 0) {
   const reviews = [];
   const items = document.querySelectorAll('.q2b7Oq');
 
-  items.forEach(el => {
-    if (maxReviews > 0 && reviews.length >= maxReviews) return;
+  for (const el of items) {
+    if (maxReviews > 0 && reviews.length >= maxReviews) break;
 
     try {
       const nameEl = el.querySelector('.InK5kS');
@@ -285,14 +371,15 @@ function coletarReviewsDOM(maxReviews = 0) {
       const bodyEl = el.querySelector('.YNedDV');
       const body = bodyEl ? bodyEl.innerText.trim() : '';
 
-      const imgs = el.querySelectorAll('.rating-media-list__image-wrapper--image');
-      const picture_urls = Array.from(imgs).map(getImageUrl).filter(Boolean).join(', ');
+      // Extrai URLs de mídia (abre modal para pegar qualidade maior)
+      const mediaUrls = await extractMediaUrlsWithExpand(el);
+      const picture_urls = mediaUrls.join(', ');
 
       if (body || reviewer_name) {
         reviews.push({ reviewer_name, rating, review_date, body, picture_urls, has_media: Boolean(picture_urls) });
       }
     } catch (e) {}
-  });
+  }
 
   return reviews;
 }
@@ -345,7 +432,7 @@ async function coletarTodasPaginas(maxReviews = 0) {
 
   for (let page = 1; page <= maxPages; page++) {
     const remaining = maxReviews > 0 ? maxReviews - collected.length : 0;
-    const pageReviews = coletarReviewsDOM(remaining);
+    const pageReviews = await coletarReviewsDOM(remaining);
 
     pageReviews.forEach(review => {
       const key = getReviewKey(review);
