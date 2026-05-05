@@ -388,49 +388,20 @@
         <div>
           <label for="shopeeShopUrl">Loja Shopee para associar</label>
           <input id="shopeeShopUrl" type="url" value="https://shopee.com.br/spf_distribuidora?categoryId=100001&entryPoint=ShopByPDP&itemId=17475776267">
-          <div class="hint">Cole handles abaixo e use este botao para gerar: URL do anuncio Shopee | handle Shopify.</div>
-        </div>
-        <div>
-          <label for="userStoreUrl">Minha loja (opcional)</label>
-          <input id="userStoreUrl" type="url" placeholder="https://www.uvits.com.br">
-          <div class="hint">Se você usar só o handle, a extensão abrirá sua página de produto usando essa base.</div>
+          <div class="hint">Cole handles abaixo e use este botao para gerar: URL do anuncio Shopee | handle.</div>
         </div>
         <div class="actions" style="margin-top:0">
           <button class="secondary" id="associate">Associar anuncios</button>
           <button class="danger" id="cancelAssociation" disabled>Cancelar</button>
         </div>
       </div>
-
-      <div class="shop-row" style="margin-top:16px; padding:14px; border:1px solid #e1e5ea; border-radius:10px; background:#fff;">
-        <div style="display:grid; gap:10px;">
-          <strong>Mapeamento manual da loja (opcional)</strong>
-          <div class="hint">Use seletores CSS apenas para escanear a página da sua loja. Se você já fornecer o handle ou a URL do produto, não precisa usar esse mapeamento.</div>
-          <div>
-            <label for="manualItemSelector">Seletor do item</label>
-            <input id="manualItemSelector" type="text" placeholder=".item-card">
-          </div>
-          <div>
-            <label for="manualLinkSelector">Seletor do link (opcional)</label>
-            <input id="manualLinkSelector" type="text" placeholder="a.item-link">
-          </div>
-          <div>
-            <label for="manualTitleSelector">Seletor do título</label>
-            <input id="manualTitleSelector" type="text" placeholder=".item-title">
-          </div>
-          <div>
-            <label for="manualImageSelector">Seletor da imagem (opcional)</label>
-            <input id="manualImageSelector" type="text" placeholder=".item-image img">
-          </div>
-        </div>
-      </div>
-      </div>
     </section>
 
     <section class="grid">
       <div>
         <label for="products">Produtos</label>
-        <textarea id="products" placeholder="Cole handles ou URLs. Para coletar, use: URL Shopee | handle Shopify"></textarea>
-        <div class="hint">Antes da associacao: um handle por linha. Depois: URL do anuncio Shopee | handle Shopify.</div>
+        <textarea id="products" placeholder="Cole handles ou URLs Shopee, um por linha"></textarea>
+        <div class="hint">Insira handles Shopee (ex: produto-nome-i.123456.789) ou URLs completas. Depois da coleta, será exibido: URL do anuncio | handle.</div>
       </div>
 
       <div class="controls">

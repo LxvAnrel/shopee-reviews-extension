@@ -647,27 +647,20 @@ async function enrichAdsWithStats(ads, concurrency) {
   });
 }
 
-async function collectHandleMetadata(handleObj, userStoreUrl = '') {
+async function collectHandleMetadata(handleObj) {
   const rawProductUrl = String(handleObj.productUrl || '').trim();
   const handleText = String(handleObj.handle || '').trim();
-  const normalizedStoreUrl = String(userStoreUrl || '').trim();
 
   const isFullUrl = /^https?:\/\//i.test(handleText);
   const productUrl = rawProductUrl || (isFullUrl ? handleText : '');
-  const storeUrl = productUrl ? '' : normalizedStoreUrl;
-  const shouldOpen = productUrl || storeUrl || /-i\./.test(handleText);
+  const shouldOpen = productUrl || /-i\./.test(handleText);
   if (!shouldOpen) {
     return { ...handleObj, title: handleText, previewHandle: handleText };
   }
 
   let url = productUrl;
   if (!url) {
-    if (storeUrl) {
-      const separator = storeUrl.endsWith('/') ? '' : '/';
-      url = `${storeUrl}${separator}${handleText}`;
-    } else {
-      url = `https://shopee.com.br/${handleText}`;
-    }
+    url = `https://shopee.com.br/${handleText}`;
   }
 
   let tab = null;
@@ -702,6 +695,83 @@ async function collectHandleMetadata(handleObj, userStoreUrl = '') {
   }
 }
 
+async function searchShopeeByBrand(brandName, limit = 100) {
+  let tab = null;
+  try {
+    assertAssociationNotCancelled();
+    const searchUrl = `https://shopee.com.br/search?keyword=${encodeURIComponent(brandName)}`;
+    tab = await chrome.tabs.create({ url: searchUrl, active: false });
+    activeTabs.add(tab.id);
+    await waitForTabLoaded(tab.id);
+    assertAssociationNotCancelled();
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    assertAssociationNotCancelled();
+
+    const response = await sendTabMessage(tab.id, {
+      action: 'collectShopAds',
+      limit: limit,
+      selectors: {}
+    });
+
+    if (response?.error) throw new Error(response.error);
+    return response?.ads || [];
+  } finally {
+    if (tab?.id) {
+      activeTabs.delete(tab.id);
+      try {
+        await chrome.tabs.remove(tab.id);
+      } catch (e) {}
+    }
+  }
+}
+
+async function matchAdsToHandles(enrichedHandles, ads) {
+  const matched = [];
+  const unmatched = [];
+
+  for (const handle of enrichedHandles) {
+    const normalized = normalizeText(handle.title || handle.handle);
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (const ad of ads) {
+      const adNormalized = normalizeText(ad.title || '');
+      let score = 0;
+
+      // Score por palavras iguais
+      const normalizedWords = normalized.split(/\s+/);
+      const adWords = adNormalized.split(/\s+/);
+      const commonWords = normalizedWords.filter(w => adWords.includes(w));
+      score += commonWords.length * 10;
+
+      // Score por substring
+      if (adNormalized.includes(normalized) || normalized.includes(adNormalized)) {
+        score += 50;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = ad;
+      }
+    }
+
+    if (bestMatch && bestScore >= 10) {
+      matched.push({
+        handle: handle.handle,
+        title: bestMatch.title,
+        imageUrl: bestMatch.imageUrl,
+        url: bestMatch.url,
+        reviewCount: bestMatch.reviewCount || 0,
+        previewHandle: handle.previewHandle
+      });
+    } else {
+      unmatched.push(handle);
+    }
+  }
+
+  return { matched, unmatched };
+}
+
 async function startAssociation(message) {
   const rawHandles = (message.handles || []).filter(Boolean);
   const handles = rawHandles.map(handle => {
@@ -713,14 +783,9 @@ async function startAssociation(message) {
       productUrl: String(handle.productUrl || '').trim()
     };
   }).filter(item => item.handle);
-  const shopUrl = String(message.shopUrl || '').trim();
-  const shopSelectors = message.shopSelectors || {};
   const concurrency = Math.max(1, Math.min(Number(message.concurrency) || 1, 6));
 
   if (!handles.length) throw new Error('Cole pelo menos um handle para associar.');
-  if (!shopUrl.includes('shopee.com.br')) throw new Error('Informe a URL da loja Shopee.');
-
-  const useDirectHandles = !String(shopSelectors.item || '').trim();
 
   state.association = {
     running: true,
@@ -735,69 +800,44 @@ async function startAssociation(message) {
     cancelRequested: false
   };
 
-  log(`Associando ${handles.length} handles${useDirectHandles ? ' diretamente via URLs' : ' com anuncios da Shopee'}.`);
+  log(`Coletando informacoes de ${handles.length} handles...`);
   assertAssociationNotCancelled();
 
-  let ads = [];
-  if (!useDirectHandles) {
-    ads = await collectShopAdsFromUrl(shopUrl, shopSelectors);
-    assertAssociationNotCancelled();
-    if (!ads.length) throw new Error('Nenhum anuncio unico foi encontrado na loja Shopee.');
-
-    state.association.adsTotal = ads.length;
-    state.association.scanned = ads.filter(ad => Number(ad.reviewCount || 0) > 0).length;
-    log(`${ads.length} anuncios unicos encontrados. Associando por nome primeiro...`);
-  }
-
-  const enrichedHandles = await Promise.all(handles.map(handle => collectHandleMetadata(handle, String(message.userStoreUrl || '').trim())));
+  // Coleta metadados de cada handle (marca, título, etc)
+  const enrichedHandles = await Promise.all(handles.map(handle => collectHandleMetadata(handle)));
   assertAssociationNotCancelled();
 
-  let result;
-  if (useDirectHandles) {
-    // Modo direto: todos os handles são considerados "matched" com seus próprios metadados
-    result = {
-      matches: enrichedHandles.map(handle => ({
-        handle: handle.handle,
-        title: handle.title,
-        imageUrl: handle.imageUrl,
-        url: handle.productUrl,
-        reviewCount: 0, // Placeholder, pois não há anúncios
-        previewHandle: handle.previewHandle
-      })),
-      unmatched: [],
-      fallbackCandidates: []
-    };
-    log(`${enrichedHandles.length} handles processados diretamente via URLs.`);
-  } else {
-    let enrichedAds = ads;
-    result = matchAdsToHandlesWithFallback(enrichedHandles, enrichedAds);
-    assertAssociationNotCancelled();
+  log(`Buscando produtos na Shopee por marca...`);
+  const brands = new Set(enrichedHandles.map(h => h.title?.split(/\s+/)[0] || '').filter(Boolean));
+  let allAds = [];
 
-    if (result.unmatched.length && ads.some(ad => !Number(ad.reviewCount || 0))) {
-      const usedUrls = new Set(result.matches.map(match => match.url));
-      const retryPool = ads
-        .filter(ad => !usedUrls.has(ad.url))
-        .slice(0, Math.min(80, ads.length));
-
-      log(`${result.unmatched.length} handles sem par. Revisando anuncios restantes com mais comentarios...`);
-      const enrichedRetry = await enrichAdsWithStats(retryPool, concurrency);
-      assertAssociationNotCancelled();
-      const enrichedByUrl = new Map(enrichedRetry.map(ad => [ad.url, ad]));
-      enrichedAds = ads.map(ad => enrichedByUrl.get(ad.url) || ad);
-      result = matchAdsToHandlesWithFallback(handles, enrichedAds);
-    }
+  for (const brand of brands) {
+    const ads = await searchShopeeByBrand(brand, 120);
+    allAds = [...allAds, ...ads];
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 
-  const { matches, unmatched, fallbackCandidates } = result;
-  const sortedAds = useDirectHandles ? [] : sortAdsByComments(ads);
+  state.association.adsTotal = allAds.length;
+  state.association.scanned = allAds.filter(ad => Number(ad.reviewCount || 0) > 0).length;
+  log(`${allAds.length} produtos encontrados na Shopee. Fazendo associacao...`);
+  assertAssociationNotCancelled();
+
+  // Enriquece anúncios com estatísticas
+  const enrichedAds = await enrichAdsWithStats(allAds, concurrency);
+  assertAssociationNotCancelled();
+
+  // Faz o matching
+  const { matched, unmatched } = await matchAdsToHandles(enrichedHandles, enrichedAds);
+
+  const fallbackCandidates = unmatched.length > 0 ? allAds.slice(0, 10) : [];
 
   state.association.running = false;
-  state.association.matched = matches;
+  state.association.matched = matched;
   state.association.unmatched = unmatched;
   state.association.fallbackCandidates = fallbackCandidates;
-  log(`${matches.length} handles associados. ${unmatched.length} sem correspondencia.`);
+  log(`${matched.length} handles associados. ${unmatched.length} sem correspondencia.`);
 
-  return { matches, unmatched, fallbackCandidates, ads: sortedAds };
+  return { matches: matched, unmatched, fallbackCandidates, ads: enrichedAds };
 }
 
 async function finishBatchIfDone() {

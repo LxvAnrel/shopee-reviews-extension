@@ -268,45 +268,59 @@ function getReviewsArea() {
 function extractMediaUrlsFromExpandedModal() {
   const mediaUrls = [];
 
-  // Procura containers de mídia na modal expandida
-  const zoomedContainers = document.querySelectorAll('.rating-media-list__zoomed-image, [class*="media"][class*="zoom"], .modal-image-container, [class*="carousel"]');
+  // Procura o container de mídia ampliada
+  const zoomedContainer = document.querySelector('.rating-media-list__zoomed-image');
+  if (!zoomedContainer) return [];
 
-  for (const container of zoomedContainers) {
-    if (!container.offsetParent) continue; // Verifica se é visível
+  // Procura a lista de itens do carousel
+  const itemList = zoomedContainer.querySelector('.rating-media-list-image-carousel__item-list');
+  if (!itemList) return [];
 
-    // Extrai vídeos
-    const videos = container.querySelectorAll('video[src]');
-    videos.forEach(video => {
+  // Itera por cada item do carousel
+  const items = itemList.querySelectorAll('.rating-media-list-image-carousel__item');
+
+  items.forEach(item => {
+    // Procura vídeo no item
+    const video = item.querySelector('video[src]');
+    if (video) {
       const src = video.getAttribute('src');
-      if (src && !mediaUrls.includes(src)) mediaUrls.push(src);
-    });
+      if (src && !mediaUrls.includes(src)) {
+        mediaUrls.push(src);
+      }
+    }
 
-    // Extrai imagens de <picture>
-    const pictures = container.querySelectorAll('picture');
-    pictures.forEach(picture => {
+    // Procura imagem no item
+    const picture = item.querySelector('picture');
+    if (picture) {
+      // Tenta source com srcset (melhor qualidade)
       const source = picture.querySelector('source[srcset]');
       if (source) {
-        const srcset = source.getAttribute('srcset');
-        const bestUrl = parseSrcset(srcset);
-        if (bestUrl && !mediaUrls.includes(bestUrl)) {
-          mediaUrls.push(normalizeShopeeImageUrl(bestUrl));
+        let srcset = source.getAttribute('srcset');
+        // Se o srcset é um URL simples (sem vírgula), usa direto
+        if (!srcset.includes(',')) {
+          const url = normalizeShopeeImageUrl(srcset.trim());
+          if (url && !mediaUrls.includes(url)) {
+            mediaUrls.push(url);
+          }
+        } else {
+          // Se tem múltiplas opções, pega a melhor
+          const bestUrl = parseSrcset(srcset);
+          if (bestUrl && !mediaUrls.includes(bestUrl)) {
+            mediaUrls.push(normalizeShopeeImageUrl(bestUrl));
+          }
         }
       } else {
+        // Se não tem source, pega da tag img
         const img = picture.querySelector('img[src]');
         if (img) {
           const url = getImageUrl(img);
-          if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
+          if (url && !mediaUrls.includes(url)) {
+            mediaUrls.push(url);
+          }
         }
       }
-    });
-
-    // Extrai imagens diretas <img>
-    const imgs = container.querySelectorAll('img[src]');
-    imgs.forEach(img => {
-      const url = getImageUrl(img);
-      if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
-    });
-  }
+    }
+  });
 
   return mediaUrls;
 }
@@ -314,40 +328,63 @@ function extractMediaUrlsFromExpandedModal() {
 async function extractMediaUrlsWithExpand(reviewEl) {
   const mediaUrls = [];
 
-  // Procura elemento de mídia clicável (thumbnail)
-  const mediaContainer = reviewEl.querySelector('[class*="media"], .rating-image-list, .review-image-wrapper');
-  const mediaImages = reviewEl.querySelectorAll('.rating-image-list img, [class*="media"] img, .review-image img');
+  // Procura o container do carousel ampliado
+  const itemList = reviewEl.querySelector('.rating-media-list-image-carousel__item-list');
+  if (!itemList) return [];
 
-  if (!mediaImages.length) return [];
+  // Encontra TODOS os items do carousel (já estão no DOM, não precisa clicar)
+  const carouselItems = itemList.querySelectorAll('.rating-media-list-image-carousel__item');
 
-  // Clica na primeira imagem para abrir a modal
-  const firstImage = mediaImages[0];
-  if (firstImage) {
-    const clickableParent = firstImage.closest('button') || firstImage.closest('[role="button"]') || firstImage.closest('div[style*="cursor"]') || firstImage;
+  console.log(`[Shopee Extension] Encontrados ${carouselItems.length} items no carousel`);
 
-    if (clickableParent) {
-      clickableParent.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(300);
-      clickableParent.click();
-      await sleep(800);
+  // Itera por cada item do carousel
+  carouselItems.forEach((item, i) => {
+    try {
+      console.log(`[Shopee Extension] Processando mídia ${i + 1} de ${carouselItems.length}`);
 
-      // Extrai URLs da modal aberta
-      mediaUrls.push(...extractMediaUrlsFromExpandedModal());
+      // Pula vídeos - procura apenas por imagens
+      const video = item.querySelector('video[src]');
+      if (video) {
+        console.log(`[Shopee Extension] Mídia ${i + 1}: VÍDEO ignorado`);
+        return;
+      }
 
-      // Tenta fechar a modal (ESC ou botão de fechar)
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
-      await sleep(400);
+      // Extrai imagem
+      const picture = item.querySelector('picture');
+      if (picture) {
+        const source = picture.querySelector('source[srcset]');
+        if (source) {
+          let srcset = source.getAttribute('srcset');
+          let url = '';
+
+          if (!srcset.includes(',')) {
+            url = normalizeShopeeImageUrl(srcset.trim());
+          } else {
+            url = normalizeShopeeImageUrl(parseSrcset(srcset));
+          }
+
+          if (url && !mediaUrls.includes(url)) {
+            mediaUrls.push(url);
+            console.log(`[Shopee Extension] Mídia ${i + 1}: IMAGEM capturada`);
+          }
+        } else {
+          // Fallback para img
+          const img = picture.querySelector('img[src]');
+          if (img) {
+            const url = getImageUrl(img);
+            if (url && !mediaUrls.includes(url)) {
+              mediaUrls.push(url);
+              console.log(`[Shopee Extension] Mídia ${i + 1}: IMAGEM capturada (fallback)`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`[Shopee Extension] Erro ao processar mídia ${i + 1}:`, e.message);
     }
-  }
+  });
 
-  // Se não conseguiu abrir ou extrair, tenta diretamente do thumbnail
-  if (!mediaUrls.length) {
-    mediaImages.forEach(img => {
-      const url = getImageUrl(img);
-      if (url && !mediaUrls.includes(url)) mediaUrls.push(url);
-    });
-  }
-
+  console.log(`[Shopee Extension] Total de mídias capturadas: ${mediaUrls.length}`);
   return mediaUrls;
 }
 
@@ -373,7 +410,7 @@ async function coletarReviewsDOM(maxReviews = 0) {
 
       // Extrai URLs de mídia (abre modal para pegar qualidade maior)
       const mediaUrls = await extractMediaUrlsWithExpand(el);
-      const picture_urls = mediaUrls.join(', ');
+      const picture_urls = mediaUrls.join(',');
 
       if (body) {
         reviews.push({ reviewer_name, rating, review_date, body, picture_urls, has_media: Boolean(picture_urls) });
