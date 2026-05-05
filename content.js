@@ -375,7 +375,7 @@ async function coletarReviewsDOM(maxReviews = 0) {
       const mediaUrls = await extractMediaUrlsWithExpand(el);
       const picture_urls = mediaUrls.join(', ');
 
-      if (body || reviewer_name) {
+      if (body) {
         reviews.push({ reviewer_name, rating, review_date, body, picture_urls, has_media: Boolean(picture_urls) });
       }
     } catch (e) {}
