@@ -783,9 +783,14 @@ async function startAssociation(message) {
       productUrl: String(handle.productUrl || '').trim()
     };
   }).filter(item => item.handle);
+  const shopUrl = String(message.shopUrl || '').trim();
+  const shopSelectors = message.shopSelectors || {};
   const concurrency = Math.max(1, Math.min(Number(message.concurrency) || 1, 6));
 
   if (!handles.length) throw new Error('Cole pelo menos um handle para associar.');
+  if (!shopUrl.includes('shopee.com.br')) throw new Error('Informe a URL da loja Shopee.');
+
+  const useDirectHandles = !String(shopSelectors.item || '').trim();
 
   state.association = {
     running: true,
@@ -800,44 +805,69 @@ async function startAssociation(message) {
     cancelRequested: false
   };
 
-  log(`Coletando informacoes de ${handles.length} handles...`);
+  log(`Associando ${handles.length} handles${useDirectHandles ? ' diretamente via URLs' : ' com anuncios da Shopee'}.`);
   assertAssociationNotCancelled();
 
-  // Coleta metadados de cada handle (marca, título, etc)
-  const enrichedHandles = await Promise.all(handles.map(handle => collectHandleMetadata(handle)));
-  assertAssociationNotCancelled();
+  let ads = [];
+  if (!useDirectHandles) {
+    ads = await collectShopAdsFromUrl(shopUrl, shopSelectors);
+    assertAssociationNotCancelled();
+    if (!ads.length) throw new Error('Nenhum anuncio unico foi encontrado na loja Shopee.');
 
-  log(`Buscando produtos na Shopee por marca...`);
-  const brands = new Set(enrichedHandles.map(h => h.title?.split(/\s+/)[0] || '').filter(Boolean));
-  let allAds = [];
-
-  for (const brand of brands) {
-    const ads = await searchShopeeByBrand(brand, 120);
-    allAds = [...allAds, ...ads];
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    state.association.adsTotal = ads.length;
+    state.association.scanned = ads.filter(ad => Number(ad.reviewCount || 0) > 0).length;
+    log(`${ads.length} anuncios unicos encontrados. Associando por nome primeiro...`);
   }
 
-  state.association.adsTotal = allAds.length;
-  state.association.scanned = allAds.filter(ad => Number(ad.reviewCount || 0) > 0).length;
-  log(`${allAds.length} produtos encontrados na Shopee. Fazendo associacao...`);
+  const enrichedHandles = await Promise.all(handles.map(handle => collectHandleMetadata(handle, String(message.userStoreUrl || '').trim())));
   assertAssociationNotCancelled();
 
-  // Enriquece anúncios com estatísticas
-  const enrichedAds = await enrichAdsWithStats(allAds, concurrency);
-  assertAssociationNotCancelled();
+  let result;
+  if (useDirectHandles) {
+    // Modo direto: todos os handles são considerados "matched" com seus próprios metadados
+    result = {
+      matches: enrichedHandles.map(handle => ({
+        handle: handle.handle,
+        title: handle.title,
+        imageUrl: handle.imageUrl,
+        url: handle.productUrl,
+        reviewCount: 0, // Placeholder, pois não há anúncios
+        previewHandle: handle.previewHandle
+      })),
+      unmatched: [],
+      fallbackCandidates: []
+    };
+    log(`${enrichedHandles.length} handles processados diretamente via URLs.`);
+  } else {
+    let enrichedAds = ads;
+    result = matchAdsToHandlesWithFallback(enrichedHandles, enrichedAds);
+    assertAssociationNotCancelled();
 
-  // Faz o matching
-  const { matched, unmatched } = await matchAdsToHandles(enrichedHandles, enrichedAds);
+    if (result.unmatched.length && ads.some(ad => !Number(ad.reviewCount || 0))) {
+      const usedUrls = new Set(result.matches.map(match => match.url));
+      const retryPool = ads
+        .filter(ad => !usedUrls.has(ad.url))
+        .slice(0, Math.min(80, ads.length));
 
-  const fallbackCandidates = unmatched.length > 0 ? allAds.slice(0, 10) : [];
+      log(`${result.unmatched.length} handles sem par. Revisando anuncios restantes com mais comentarios...`);
+      const enrichedRetry = await enrichAdsWithStats(retryPool, concurrency);
+      assertAssociationNotCancelled();
+      const enrichedByUrl = new Map(enrichedRetry.map(ad => [ad.url, ad]));
+      enrichedAds = ads.map(ad => enrichedByUrl.get(ad.url) || ad);
+      result = matchAdsToHandlesWithFallback(handles, enrichedAds);
+    }
+  }
+
+  const { matches, unmatched, fallbackCandidates } = result;
+  const sortedAds = useDirectHandles ? [] : sortAdsByComments(ads);
 
   state.association.running = false;
-  state.association.matched = matched;
+  state.association.matched = matches;
   state.association.unmatched = unmatched;
   state.association.fallbackCandidates = fallbackCandidates;
-  log(`${matched.length} handles associados. ${unmatched.length} sem correspondencia.`);
+  log(`${matches.length} handles associados. ${unmatched.length} sem correspondencia.`);
 
-  return { matches: matched, unmatched, fallbackCandidates, ads: enrichedAds };
+  return { matches, unmatched, fallbackCandidates, ads: sortedAds };
 }
 
 async function finishBatchIfDone() {

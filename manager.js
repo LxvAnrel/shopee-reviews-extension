@@ -346,7 +346,12 @@ function saveSettings() {
     managerProducts: productsEl.value,
     managerMaxReviews: maxReviewsEl.value,
     managerConcurrency: concurrencyEl.value,
-    managerShopeeShopUrl: shopeeShopUrlEl.value
+    managerShopeeShopUrl: shopeeShopUrlEl.value,
+    managerUserStoreUrl: userStoreUrlEl.value,
+    managerManualItemSelector: manualItemSelectorEl.value,
+    managerManualLinkSelector: manualLinkSelectorEl.value,
+    managerManualTitleSelector: manualTitleSelectorEl.value,
+    managerManualImageSelector: manualImageSelectorEl.value
   });
 }
 
@@ -355,12 +360,18 @@ function loadSettings() {
     'managerProducts',
     'managerMaxReviews',
     'managerConcurrency',
-    'managerShopeeShopUrl'
+    'managerShopeeShopUrl',
+    'managerUserStoreUrl'
   ], data => {
     productsEl.value = data.managerProducts || '';
     maxReviewsEl.value = data.managerMaxReviews || '100';
     concurrencyEl.value = data.managerConcurrency || '1';
     shopeeShopUrlEl.value = data.managerShopeeShopUrl || shopeeShopUrlEl.value;
+    userStoreUrlEl.value = data.managerUserStoreUrl || '';
+    manualItemSelectorEl.value = data.managerManualItemSelector || '';
+    manualLinkSelectorEl.value = data.managerManualLinkSelector || '';
+    manualTitleSelectorEl.value = data.managerManualTitleSelector || '';
+    manualImageSelectorEl.value = data.managerManualImageSelector || '';
   });
 }
 
@@ -374,15 +385,22 @@ associateEl.addEventListener('click', () => {
 
   associateEl.disabled = true;
   startEl.disabled = true;
-  setStatus('Coletando informações e buscando na Shopee...');
+  setStatus('Abrindo a loja Shopee e analisando anuncios...');
   saveSettings();
   startPolling();
 
   chrome.runtime.sendMessage({
     action: 'associateShopeeAds',
     shopUrl: shopeeShopUrlEl.value,
+    userStoreUrl: userStoreUrlEl.value,
     handles,
-    concurrency: Number(concurrencyEl.value) || 1
+    concurrency: Number(concurrencyEl.value) || 1,
+    shopSelectors: {
+      item: manualItemSelectorEl.value,
+      link: manualLinkSelectorEl.value,
+      title: manualTitleSelectorEl.value,
+      image: manualImageSelectorEl.value
+    }
   }, response => {
     associateEl.disabled = false;
     startEl.disabled = false;
